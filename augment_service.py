@@ -1,10 +1,9 @@
-from numpy import place
+
+from platform import python_branch
 import requests
 import mysql.connector
 import os
 from dotenv import load_dotenv
-import pandas as pd
-import inquirer
 import time
 import json
 load_dotenv()
@@ -19,14 +18,10 @@ mydb = mysql.connector.connect(
 )
 API_KEY= os.getenv('API_KEY')
 mysql_cursor = mydb.cursor(buffered=True)
-mysql_cursor.execute('CREATE TABLE IF NOT EXISTS augments_match_data (id INTEGER AUTO_INCREMENT PRIMARY KEY, matchid TEXT,elo TEXT,game_version TEXT,placement INT,augment TEXT,api_name TEXT,tier TEXT,round TEXT ,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-mysql_cursor.execute('CREATE TABLE IF NOT EXISTS matches (id INTEGER AUTO_INCREMENT PRIMARY KEY, matchid TEXT,elo TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-mysql_cursor.execute('CREATE TABLE IF NOT EXISTS augments_stats (id INTEGER AUTO_INCREMENT PRIMARY KEY, name TEXT,api_name TEXT,tier TEXT,avg_placement FLOAT,avg_placement14 FLOAT,avg_placement33 FLOAT,avg_placement46 FLOAT ,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-mysql_cursor.execute('CREATE TABLE IF NOT EXISTS historic_stats (id INTEGER AUTO_INCREMENT PRIMARY KEY, user TEXT,status TEXT,progresso FLOAT DEFAULT 0 ,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-print(mysql_cursor.statement)
-mydb.commit()
 
-mysql_cursor.execute('SELECT * FROM augmentsdb.matches;')
+
+
+mysql_cursor.execute('SELECT * FROM matches;')
 
 matchesIds = mysql_cursor.fetchall()
 
@@ -88,7 +83,7 @@ def grab_player_data(requests_count,historic_stats_id):
                 continue
             
             for match in matches:
-                mysql_cursor.execute('SELECT * FROM augmentsdb.matches where matchid = %s;', (match,))
+                mysql_cursor.execute('SELECT * FROM matches where matchid = %s;', (match,))
                 match_id_check = mysql_cursor.fetchall()
                 if(len(match_id_check) > 0):
                     print('Id de partida já existente >> ', match)
@@ -118,7 +113,7 @@ def grab_match_data(matchesIds,requests_count,historic_stats_id):
         
         
         matchId = match[1]
-        mysql_cursor.execute('SELECT * FROM augmentsdb.augments_match_data where matchid = %s;', (matchId,))
+        mysql_cursor.execute('SELECT * FROM augments_match_data where matchid = %s;', (matchId,))
         match_id_check = mysql_cursor.fetchall()
        
         
@@ -182,7 +177,7 @@ def grab_match_data(matchesIds,requests_count,historic_stats_id):
  
  
 def generate_augments_stats(historic_stats_id):
-    mysql_cursor.execute('SELECT distinct api_name FROM augmentsdb.augments_match_data;')
+    mysql_cursor.execute('SELECT distinct api_name FROM augments_match_data;')
     print(mysql_cursor.statement)
     augments_names = mysql_cursor.fetchall()
     mysql_cursor.execute(f"UPDATE historic_stats SET status = 'Gerando augments stats',progresso= 0.8 WHERE id = %s", (historic_stats_id,))
@@ -213,27 +208,27 @@ def generate_augments_stats(historic_stats_id):
             (SELECT 
                     AVG(placement)
                 FROM
-                    augmentsdb.augments_match_data
+                    augments_match_data
                 WHERE
                     api_name = "{agument_name}") AS avgPlacement,
             (SELECT 
                     AVG(placement)
                 FROM
-                    augmentsdb.augments_match_data
+                    augments_match_data
                 WHERE
                     api_name = "{agument_name}"
                         AND round = "stage14") AS avgPlacement_14,
             (SELECT 
                     AVG(placement)
                 FROM
-                    augmentsdb.augments_match_data
+                    augments_match_data
                 WHERE
                     api_name = "{agument_name}"
                         AND round = "stage33") AS avgPlacement_33,
             (SELECT 
                     AVG(placement)
                 FROM
-                    augmentsdb.augments_match_data
+                    augments_match_data
                 WHERE
                     api_name = "{agument_name}"
                         AND round = "stage46") AS avgPlacement_46""")
@@ -241,7 +236,7 @@ def generate_augments_stats(historic_stats_id):
         print(mysql_cursor.statement)
         stats = mysql_cursor.fetchall()[0]
         print(stats)
-        mysql_cursor.execute(f"""SELECT * FROM augmentsdb.augments_stats where api_name = "{agument_name}" """)
+        mysql_cursor.execute(f"""SELECT * FROM augments where api_name = "{agument_name}" """)
         stats_exists = mysql_cursor.fetchall()
         stats14 = stats[4]
         stats33 = stats[5]
@@ -255,11 +250,11 @@ def generate_augments_stats(historic_stats_id):
             stats46 = 0
             
         if len(stats_exists) > 0:
-            mysql_cursor.execute(f'UPDATE  augments_stats SET name="{stats[0]}",api_name="{stats[1]}",tier="{stats[2]}",avg_placement={stats[3]},avg_placement14={stats14},avg_placement33={stats33},avg_placement46={stats46} where api_name = "{agument_name}"')
+            mysql_cursor.execute(f'UPDATE  augments SET name="{stats[0]}",api_name="{stats[1]}",tier="{stats[2]}",placement={stats[3]},stage14={stats14},stage33={stats33},stage46={stats46} where api_name = "{agument_name}"')
             print(mysql_cursor.statement)
             mydb.commit() 
         else:
-            mysql_cursor.execute(f'INSERT INTO augments_stats (name,api_name,tier,avg_placement,avg_placement14,avg_placement33,avg_placement46) VALUES ("{stats[0]}","{stats[1]}","{stats[2]}","{stats[3]}","{stats14}","{stats33}","{stats46}")')
+            mysql_cursor.execute(f'INSERT INTO augments (name,api_name,tier,placement,stage14,stage33,stage46) VALUES ("{stats[0]}","{stats[1]}","{stats[2]}","{stats[3]}","{stats14}","{stats33}","{stats46}")')
             print(mysql_cursor.statement)
             mydb.commit()
         mysql_cursor.execute(f"UPDATE historic_stats SET progresso= 0.8 + (0.2 * {index} / {len(augments_names)}) WHERE id = %s", (historic_stats_id,))
@@ -267,40 +262,23 @@ def generate_augments_stats(historic_stats_id):
         mydb.commit()
                    
                     
-def augment_service(historic_stats_id):
+def augment_service(historic_stats):
    
+    historic_stats_id = historic_stats["id"]
     global request_count
     requests_count = 0
-    grab_player_data(requests_count,historic_stats_id)
-    grab_player_data(requests_count,historic_stats_id)
-    generate_augments_stats(historic_stats_id)
-    mysql_cursor.execute('SELECT * FROM augmentsdb.matches;')
-    matchesIds = mysql_cursor.fetchall()
-    questions = [
-                  inquirer.List('awnser',
-                      message="Deseja realizar update nos stats?",
-                      choices=['Sim','Não'],
-                  ),
-                  ]
-    answers = inquirer.prompt(questions)
-    if answers['awnser'] == 'Sim':
-        generate_augments_stats()
-    
-        
-    questions = [
-                  inquirer.List('awnser',
-                      message="Deseja realizar update da playerbase?",
-                      choices=['Sim','Não'],
-                  ),
-                  ]
-    answers = inquirer.prompt(questions)
-    if answers['awnser'] == 'Sim':
-        grab_player_data(requests_count,historic_stats_id)
-        
-        
-     
-    if(len(matchesIds) > 0):
-        grab_match_data(matchesIds,requests_count,historic_stats_id)
-        
-   
 
+    try:
+        if historic_stats["generate_player_data"] == 1:
+            grab_player_data(requests_count,historic_stats_id)
+        
+        if historic_stats["grab_match_data"] == 1:
+            grab_match_data(matchesIds,requests_count,historic_stats_id)
+                       
+        if historic_stats["generete_augment_stats"] == 1:
+            generate_augments_stats(historic_stats_id)
+            
+    except Exception as e:
+        print(f"Erro ao buscar dados de partida: {e}")        
+        mysql_cursor.execute(f"UPDATE historic_stats SET status = 'Erro ao buscar dados de partida',progresso= 0.0 WHERE id = %s", (historic_stats_id,))
+        
